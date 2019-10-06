@@ -1,0 +1,33 @@
+language: go
+
+addons:
+  apt:
+    packages:
+      - rpm
+
+services:
+  - docker
+
+env:
+  - GO111MODULE=on
+  - IMAGE=garugaru/sqs-exporter
+
+script:
+  - go build
+  - docker build -t $IMAGE:latest .
+  - docker build -t $IMAGE:$TRAVIS_COMMIT .
+
+after_success:
+  - test -n "$TRAVIS_TAG" && docker login -u=$DOCKER_USER -p="$DOCKER_PASSWORD"
+
+deploy:
+  - provider: script
+    script: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD && docker push $IMAGE:latest && docker push $IMAGE:$TRAVIS_COMMIT
+    on:
+      branch: master
+  - provider: script
+    skip_cleanup: true
+    script: curl -sL https://git.io/goreleaser | bash
+    on:
+      tags: true
+      condition: $TRAVIS_OS_NAME = linux
