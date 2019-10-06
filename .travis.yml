@@ -10,9 +10,11 @@ addons:
 services:
   - docker
 
+
 env:
-  - GO111MODULE=on
-  - IMAGE=garugaru/sqs-exporter
+  global:
+    - GO111MODULE=on
+    - IMAGE=garugaru/sqs-exporter
 
 script:
   - go build
