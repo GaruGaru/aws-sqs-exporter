@@ -1,6 +1,4 @@
 ARG GO_VERSION=1.13
-ARG PORT=9121
-
 FROM golang:${GO_VERSION}-alpine AS builder
 
 RUN apk add --no-cache ca-certificates git
@@ -24,7 +22,5 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app /app
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-EXPOSE $PORT
 
 ENTRYPOINT ["/app"]
