@@ -1,4 +1,4 @@
-module github.com/GaruGaru/sqs-exporter
+module sqs-exporter
 
 go 1.13
 
