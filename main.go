@@ -11,20 +11,28 @@ import (
 	"time"
 )
 
-var (
-	addr        = *flag.String("addr", "0.0.0.0", "web server bind address")
-	port        = *flag.Int("port", 9999, "web server port")
-	metricsPath = *flag.String("path", "/metrics", "exporter metrics path")
-	refreshRate = *flag.Int("refresh", 1*60, "refresh delay in seconds")
-)
 
 func main() {
+	addr        := flag.String("addr", "0.0.0.0", "web server bind address")
+	port        := flag.Int("port", 9999, "web server port")
+	metricsPath := flag.String("path", "/metrics", "exporter metrics path")
+	refreshRate := flag.Int("refresh", 1*60, "refresh delay in seconds")
+
+	flag.Parse()
+
+	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
 	registry := prometheus.NewRegistry()
 
 	sqsExporter := sqs.NewExporter(registry)
 
-	ticker := time.NewTicker(time.Duration(refreshRate) * time.Second)
+	ticker := time.NewTicker(time.Duration(*refreshRate) * time.Second)
 	done := make(chan bool)
+
+	err := sqsExporter.Sync()
+
+	if err != nil {
+		panic(err)
+	}
 
 	go func() {
 		for {
@@ -40,9 +48,9 @@ func main() {
 		}
 	}()
 
-	http.Handle(metricsPath, promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	http.Handle(*metricsPath, promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 
-	bind := fmt.Sprintf("%s:%d", addr, port)
+	bind := fmt.Sprintf("%s:%d", *addr, *port)
 
 	log.Infof("started metrics server on %s", bind)
 
