@@ -7,7 +7,7 @@ Prometheus exporter for aws sqs service with async refresh and cloudwatch integr
 
 ## Running
 
-###Docker
+### Docker
 ```bash
 docker run -it \
  -e AWS_REGION=<region> \
@@ -17,7 +17,7 @@ docker run -it \
  garugaru/sqs-exporter
 ```
 
-###Binary
+### Binary
 ```bash
 sqs-exporter -refresh 60 # Refresh every 60s
 ```
