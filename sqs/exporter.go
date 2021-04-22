@@ -67,6 +67,7 @@ func NewExporter(registry *prometheus.Registry) *Exporter {
 		queueMessagesGauge:           queueMessageGauge,
 		queueAgeOfOldestMessageGauge: ageOfOldestMessageGauge,
 		queueMessagesInFlightGauge:   queueMessagesInFlight,
+		queueMessageTotalsGauge:      queueMessageTotalsGauge,
 	}
 }
 
