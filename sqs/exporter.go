@@ -146,7 +146,7 @@ func (e *Exporter) QueuesMetrics() ([]QueueMetric, error) {
 		return nil, e
 	}
 
-	logrus.Infof("metrics scraping completed for %d queues, duration: %d ms", len(resultsSlice), time.Now().Sub(begin).Milliseconds())
+	logrus.Infof("metrics scraping completed for %d queues, duration: %d ms", len(resultsSlice), time.Since(begin).Milliseconds())
 	return resultsSlice, nil
 }
 
