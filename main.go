@@ -11,10 +11,9 @@ import (
 	"time"
 )
 
-
 func main() {
-	addr        := flag.String("addr", "0.0.0.0", "web server bind address")
-	port        := flag.Int("port", 9999, "web server port")
+	addr := flag.String("addr", "0.0.0.0", "web server bind address")
+	port := flag.Int("port", 9999, "web server port")
 	metricsPath := flag.String("path", "/metrics", "exporter metrics path")
 	refreshRate := flag.Int("refresh", 1*60, "refresh delay in seconds")
 

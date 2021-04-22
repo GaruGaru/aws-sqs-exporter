@@ -20,6 +20,7 @@ type Exporter struct {
 	queueMessagesGauge           *prometheus.GaugeVec
 	queueMessagesInFlightGauge   *prometheus.GaugeVec
 	queueAgeOfOldestMessageGauge *prometheus.GaugeVec
+	queueMessageTotalsGauge      *prometheus.GaugeVec
 }
 
 type QueueMetric struct {
@@ -27,6 +28,7 @@ type QueueMetric struct {
 	Messages                  int64
 	MessagesInFlight          int64
 	AgeOfOldestMessageSeconds int64
+	MessagesTotal             int64
 }
 
 func NewExporter(registry *prometheus.Registry) *Exporter {
@@ -49,7 +51,12 @@ func NewExporter(registry *prometheus.Registry) *Exporter {
 		Help: "Sqs message in flight messages..",
 	}, []string{"queue_name"})
 
-	registry.MustRegister(queueMessageGauge, ageOfOldestMessageGauge, queueMessagesInFlight)
+	queueMessageTotalsGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "sqs_queue_messages_total",
+		Help: "Total sqs queue messages both queued and in-flight",
+	}, []string{"queue_name"})
+
+	registry.MustRegister(queueMessageGauge, ageOfOldestMessageGauge, queueMessagesInFlight, queueMessageTotalsGauge)
 
 	logrus.Info("sqs exported registered")
 
@@ -86,6 +93,10 @@ func (e *Exporter) Sync() error {
 		e.queueMessagesInFlightGauge.
 			With(labels).
 			Set(float64(metric.MessagesInFlight))
+
+		e.queueMessageTotalsGauge.
+			With(labels).
+			Set(float64(metric.Messages + metric.MessagesInFlight))
 	}
 
 	return nil
