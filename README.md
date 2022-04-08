@@ -1,7 +1,7 @@
 # sqs-exporter
 [![Go Report Card](https://goreportcard.com/badge/github.com/GaruGaru/aws-sqs-exporter)](https://goreportcard.com/report/github.com/GaruGaru/aws-sqs-exporter)
 [![Travis Card](https://travis-ci.org/GaruGaru/aws-sqs-exporter.svg?branch=master)](https://travis-ci.org/GaruGaru/aws-sqs-exporter)
-[![MicroBadger Size](https://img.shields.io/microbadger/image-size/garugaru/sqs-exporter)](https://cloud.docker.com/u/garugaru/repository/docker/garugaru/sqs-exporter)
+[![MicroBadger Size](https://img.shields.io/microbadger/image-size/garugaru/aws-sqs-exporter)](https://cloud.docker.com/u/garugaru/repository/docker/garugaru/sqs-exporter)
  
 Prometheus exporter for aws sqs service with async refresh and cloudwatch integration 
 
