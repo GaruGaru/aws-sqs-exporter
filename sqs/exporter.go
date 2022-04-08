@@ -1,12 +1,14 @@
 package sqs
 
 import (
+	"context"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,40 +23,62 @@ type Exporter struct {
 	queueMessagesInFlightGauge   *prometheus.GaugeVec
 	queueAgeOfOldestMessageGauge *prometheus.GaugeVec
 	queueMessageTotalsGauge      *prometheus.GaugeVec
+	exportedTags                 []queueTag
 }
 
 type QueueMetric struct {
 	QueueName                 string
+	Tags                      map[string]string
 	Messages                  int64
 	MessagesInFlight          int64
 	AgeOfOldestMessageSeconds int64
 	MessagesTotal             int64
 }
 
-func NewExporter(registry *prometheus.Registry) *Exporter {
+type queueTag struct {
+	Original   string
+	Normalized string
+}
+
+func createQueueTag(original string) queueTag {
+	return queueTag{
+		Original:   original,
+		Normalized: normalizeTag(original),
+	}
+}
+
+func NewExporter(registry *prometheus.Registry, exportedTags []string) *Exporter {
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigEnable,
 	}))
 
+	exportedQueueTags := make([]queueTag, len(exportedTags))
+	additionalLabels := make([]string, len(exportedTags))
+	for i, tag := range exportedTags {
+		queueTag := createQueueTag(tag)
+		exportedQueueTags[i] = queueTag
+		additionalLabels[i] = queueTag.Normalized
+	}
+
 	queueMessageGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sqs_queue_messages",
 		Help: "Sqs message queue size.",
-	}, []string{"queue_name"})
+	}, append([]string{"queue_name"}, additionalLabels...))
 
 	ageOfOldestMessageGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sqs_queue_oldest_message_age",
 		Help: "Sqs queue age of oldest message in seconds.",
-	}, []string{"queue_name"})
+	}, append([]string{"queue_name"}, additionalLabels...))
 
 	queueMessagesInFlight := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sqs_queue_messages_in_flight",
 		Help: "Sqs message in flight messages..",
-	}, []string{"queue_name"})
+	}, append([]string{"queue_name"}, additionalLabels...))
 
 	queueMessageTotalsGauge := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "sqs_queue_messages_total",
 		Help: "Total sqs queue messages both queued and in-flight",
-	}, []string{"queue_name"})
+	}, append([]string{"queue_name"}, additionalLabels...))
 
 	registry.MustRegister(queueMessageGauge, ageOfOldestMessageGauge, queueMessagesInFlight, queueMessageTotalsGauge)
 
@@ -68,6 +92,7 @@ func NewExporter(registry *prometheus.Registry) *Exporter {
 		queueAgeOfOldestMessageGauge: ageOfOldestMessageGauge,
 		queueMessagesInFlightGauge:   queueMessagesInFlight,
 		queueMessageTotalsGauge:      queueMessageTotalsGauge,
+		exportedTags:                 exportedQueueTags,
 	}
 }
 
@@ -81,6 +106,10 @@ func (e *Exporter) Sync() error {
 	for _, metric := range metrics {
 		labels := prometheus.Labels{
 			"queue_name": metric.QueueName,
+		}
+
+		for _, tag := range e.exportedTags {
+			labels[tag.Normalized] = metric.Tags[tag.Original]
 		}
 
 		e.queueMessagesGauge.
@@ -103,32 +132,79 @@ func (e *Exporter) Sync() error {
 	return nil
 }
 
-func (e *Exporter) QueuesMetrics() ([]QueueMetric, error) {
+type sqsQueue struct {
+	Name string
+	Url  string
+	Tags map[string]string
+}
 
-	queues, err := e.SQS.ListQueues(&sqs.ListQueuesInput{})
+type queueListRequest struct {
+	includeTags bool
+}
+
+func (e *Exporter) listQueues(ctx context.Context, req queueListRequest) ([]sqsQueue, error) {
+	queueNames, err := e.SQS.ListQueues(&sqs.ListQueuesInput{})
 
 	if err != nil {
 		return nil, err
 	}
 
-	logrus.Infof("fetching metrics for %d queues", len(queues.QueueUrls))
+	queues := make([]sqsQueue, len(queueNames.QueueUrls))
 
-	results := make(chan *QueueMetric, len(queues.QueueUrls))
-	errors := make(chan error, len(queues.QueueUrls))
+	for i, q := range queueNames.QueueUrls {
+		var tags = make(map[string]string)
+
+		if req.includeTags {
+			queueTags, err := e.SQS.ListQueueTagsWithContext(ctx, &sqs.ListQueueTagsInput{
+				QueueUrl: q,
+			})
+
+			if err != nil {
+				return nil, err
+			}
+
+			for name, value := range queueTags.Tags {
+				tags[name] = *value
+			}
+		}
+
+		queues[i] = sqsQueue{
+			Name: queueNameFromUrl(*q),
+			Url:  *q,
+			Tags: tags,
+		}
+	}
+	return queues, nil
+}
+
+func (e *Exporter) QueuesMetrics() ([]QueueMetric, error) {
+	queues, err := e.listQueues(context.TODO(), queueListRequest{
+		// skip tags api request if no exported tags are requested
+		includeTags: len(e.exportedTags) > 0,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	logrus.Infof("fetching metrics for %d queues", len(queues))
+
+	results := make(chan *QueueMetric, len(queues))
+	errors := make(chan error, len(queues))
 
 	begin := time.Now()
 
 	var wg sync.WaitGroup
-	wg.Add(len(queues.QueueUrls))
-	for _, queueUrl := range queues.QueueUrls {
-		go func(url *string) {
+	wg.Add(len(queues))
+	for _, queue := range queues {
+		go func(queue sqsQueue) {
 			defer wg.Done()
-			info, err := e.fetchQueuesMetrics(url)
+			info, err := e.fetchQueuesMetrics(queue)
 			if err != nil {
 				errors <- err
 			}
 			results <- info
-		}(queueUrl)
+		}(queue)
 	}
 
 	wg.Wait()
@@ -178,10 +254,10 @@ func (e *Exporter) QueueAgeOfOldestMessage(queueName string) (int64, error) {
 	return age, nil
 }
 
-func (e *Exporter) fetchQueuesMetrics(url *string) (*QueueMetric, error) {
+func (e *Exporter) fetchQueuesMetrics(queue sqsQueue) (*QueueMetric, error) {
 	req, err := e.SQS.GetQueueAttributes(&sqs.GetQueueAttributesInput{
 		AttributeNames: aws.StringSlice([]string{"ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible"}),
-		QueueUrl:       url,
+		QueueUrl:       &queue.Url,
 	})
 
 	if err != nil {
@@ -200,19 +276,18 @@ func (e *Exporter) fetchQueuesMetrics(url *string) (*QueueMetric, error) {
 		return nil, err
 	}
 
-	queueName := queueNameFromUrl(*url)
-
 	ageOfOldestMessage := int64(0)
 
 	if messages > 0 {
-		ageOfOldestMessage, err = e.QueueAgeOfOldestMessage(queueName)
+		ageOfOldestMessage, err = e.QueueAgeOfOldestMessage(queue.Name)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return &QueueMetric{
-		QueueName:                 queueName,
+		QueueName:                 queue.Name,
+		Tags:                      queue.Tags,
 		Messages:                  messages,
 		AgeOfOldestMessageSeconds: ageOfOldestMessage,
 		MessagesInFlight:          messagesInFlight,
@@ -221,4 +296,12 @@ func (e *Exporter) fetchQueuesMetrics(url *string) (*QueueMetric, error) {
 
 func queueNameFromUrl(url string) string {
 	return url[strings.LastIndex(url, "/")+1:]
+}
+
+var wordsRe = regexp.MustCompile(`[^A-Za-z\d]+`)
+
+func normalizeTag(name string) string {
+	name = strings.ToLower(name)
+	name = wordsRe.ReplaceAllString(name, "_")
+	return name
 }
